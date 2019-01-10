@@ -13,6 +13,12 @@ def worker(remote, parent_remote, env_fn_wrapper):
                 if done:
                     ob = env.reset()
                 remote.send((ob, reward, done, info))
+            elif cmd == 'stay':
+
+                ob, reward, done, info = env.stay(data)
+                if done:
+                    ob = env.reset()
+                remote.send((ob, reward, done, info))
             elif cmd == 'reset':
                 ob = env.reset()
                 remote.send(ob)
@@ -45,6 +51,7 @@ class SubprocVecEnv(VecEnv):
         self.waiting = False
         self.closed = False
         nenvs = len(env_fns)
+        self.n_active_envs = nenvs
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
         self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
                    for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]

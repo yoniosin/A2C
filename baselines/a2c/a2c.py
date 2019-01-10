@@ -13,6 +13,7 @@ from baselines.a2c.utils import Scheduler, find_trainable_variables
 from baselines.a2c.runner import Runner
 
 from tensorflow import losses
+import traceback
 
 class Model(object):
 
@@ -33,7 +34,7 @@ class Model(object):
             alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
 
         sess = tf_util.get_session()
-        nenvs = env.num_envs
+        nenvs = env.venv.n_active_envs
         nbatch = nenvs*nsteps
 
 
@@ -117,6 +118,7 @@ class Model(object):
 def learn(
     network,
     env,
+    prio_args,
     seed=None,
     nsteps=5,
     total_timesteps=int(80e6),
@@ -179,12 +181,10 @@ def learn(
 
     '''
 
-
-
+    traceback.print_stack()
     set_global_seeds(seed)
 
     # Get the nb of env
-    nenvs = env.num_envs
     policy = build_policy(env, network, **network_kwargs)
 
     # Instantiate the model object (that creates step_model and train_model)
@@ -197,7 +197,7 @@ def learn(
     runner = Runner(env, model, nsteps=nsteps, gamma=gamma)
 
     # Calculate the batch_size
-    nbatch = nenvs*nsteps
+    nbatch = runner.n_active_envs*nsteps
 
     # Start total timer
     tstart = time.time()
