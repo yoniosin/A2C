@@ -28,7 +28,8 @@ class Runner(AbstractEnvRunner):
         # overwrite super class
 
         # We initialize the lists that will contain the mb of experiences
-        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)]
+        # mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)]
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [], [], [], [], [], [[] for _ in range(self.nenv)]
         mb_states = self.states
         for n in range(self.nsteps):
             # Given observations, take action and value (V(s))
@@ -41,37 +42,23 @@ class Runner(AbstractEnvRunner):
             actions, values, states, _ = self.model.step(active_obs, S=active_states, M=active_dones)
 
             # Append the experiences
-            for i, env in enumerate(self.active_envs):
-                envs_activations[env].append(n)
-                mb_obs[env].append(np.copy(active_obs[i]))
-                mb_actions[env].append(actions[i])
-                mb_values[env].append(values[i])
-                mb_dones[env].append(active_dones[i])
+            mb_obs.append(np.copy(active_obs))
+            mb_actions.append(actions)
+            mb_values.append(values)
+            mb_dones.append(active_dones)
 
             # Take actions in env and look the results
             obs, rewards, dones, _ = self.env.step(actions)
             self.states = states
-            for i, (env, done) in enumerate(zip(self.active_envs, dones)):
+            for i, (done, env_i) in enumerate(zip(dones, self.active_envs)):
+                envs_activations[env_i].append(n)
+                self.dones[env_i] = done
                 if done:
-                    self.obs[env] = self.obs[env] * 0
-                self.obs[env] = obs[env]
-                self.dones[env] = done
-                mb_rewards[env].append(rewards[i])
+                    self.obs[env_i] = self.obs[env_i] * 0
+            self.obs = obs
+            mb_rewards.append(rewards)
+        mb_dones.append(active_dones)
 
-        if self.gamma > 0.0:
-            for i in range(self.nenv):
-                if len(envs_activations[i]) != 0:
-                    last_values = self.model.value(mb_obs[i][-1], S=self.states, M=[mb_dones[i][-1]])
-                # rewards = mb_rewards[i]
-                # dones = mb_dones
-                # if dones[-1] == 0:
-                #     rewards = discount_with_dones(rewards + [last_values], dones + [0], self.gamma)[:-1]
-                # else:
-                #     rewards = discount_with_dones(rewards, dones, self.gamma)
-                #
-                # mb_rewards[i] = rewards
-
-        mb_obs = mb_obs.flatten()
         # Batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
@@ -83,9 +70,8 @@ class Runner(AbstractEnvRunner):
 
         if self.gamma > 0.0:
             # Discount/bootstrap off value fn
-            last_values = self.model.value(active_obs, S=active_states, M=active_dones).tolist()
-
-            for n, (rewards, dones, value, actives_env) in enumerate(zip(mb_rewards, mb_dones, last_values, envs_activations)):
+            last_values = self.model.value(self.obs, S=self.states, M=self.dones).tolist()
+            for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_values)):
                 rewards = rewards.tolist()
                 dones = dones.tolist()
                 if dones[-1] == 0:
@@ -95,7 +81,6 @@ class Runner(AbstractEnvRunner):
 
                 mb_rewards[n] = rewards
 
-        mb_obs = np.concatenate(mb_obs)
         mb_actions = mb_actions.reshape(self.batch_action_shape)
 
         mb_rewards = mb_rewards.flatten()

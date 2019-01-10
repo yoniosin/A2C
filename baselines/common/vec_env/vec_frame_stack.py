@@ -17,8 +17,8 @@ class VecFrameStack(VecEnvWrapper):
 
     def step_wait(self):
         obs, rews, news, infos = self.venv.step_wait()
-        self.stackedobs = np.roll(self.stackedobs, shift=-1, axis=-1)
         for i, env_i in enumerate(self.venv.active_envs_set):
+            self.stackedobs[env_i] = np.roll(self.stackedobs[env_i], shift=-1, axis=-1)
             if news[i]:
                 self.stackedobs[env_i] = 0
             self.stackedobs[env_i, ..., -obs.shape[-1]:] = obs[i]
