@@ -17,12 +17,18 @@ class VecFrameStack(VecEnvWrapper):
 
     def step_wait(self):
         obs, rews, news, infos = self.venv.step_wait()
-        for i, env_i in enumerate(self.venv.active_envs_set):
-            self.stackedobs[env_i] = np.roll(self.stackedobs[env_i], shift=-1, axis=-1)
-            if news[i]:
-                self.stackedobs[env_i] = 0
-            self.stackedobs[env_i, ..., -obs.shape[-1]:] = obs[i]
-        return self.stackedobs, rews, news, infos
+        whole_reward = np.zeros(self.num_envs)
+        whole_news = np.ones(self.num_envs, dtype=bool)
+        for i in range(self.venv.num_envs):
+            self.stackedobs[i] = np.roll(self.stackedobs[i], shift=-1, axis=-1)
+            if i in self.venv.active_envs_set:
+                idx = np.where(np.asanyarray(self.venv.active_envs_set) == i)[0]
+                if news[idx]:
+                    self.stackedobs[i] = 0
+                self.stackedobs[i, ..., -obs.shape[-1]:] = obs[idx]
+                whole_news[i] = news[idx]
+                whole_reward[i] = rews[idx]
+        return self.stackedobs, whole_reward, list(whole_news), infos
 
     def reset(self):
         obs = self.venv.reset()

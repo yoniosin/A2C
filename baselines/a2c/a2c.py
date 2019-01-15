@@ -34,7 +34,7 @@ class Model(object):
             alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
 
         sess = tf_util.get_session()
-        nenvs = env.venv.n_active_envs
+        nenvs = env.venv.num_envs
         nbatch = nenvs*nsteps
 
 
