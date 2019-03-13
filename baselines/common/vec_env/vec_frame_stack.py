@@ -16,6 +16,7 @@ class VecFrameStack(VecEnvWrapper):
         VecEnvWrapper.__init__(self, venv, observation_space=observation_space)
 
     def step_wait(self):
+        '''
         obs, rews, news, infos = self.venv.step_wait()
         whole_reward = np.zeros(self.num_envs)
         whole_news = np.ones(self.num_envs, dtype=bool)
@@ -29,6 +30,16 @@ class VecFrameStack(VecEnvWrapper):
                 whole_news[i] = news[idx]
                 whole_reward[i] = rews[idx]
         return self.stackedobs, whole_reward, list(whole_news), infos
+        '''
+
+        obs, rews, news, infos = self.venv.step_wait()
+        self.stackedobs = np.roll(self.stackedobs, shift=-1, axis=-1)
+        for (i, new) in enumerate(news):
+            if new:
+                self.stackedobs[i] = 0
+        self.stackedobs[..., -obs.shape[-1]:] = obs
+        return self.stackedobs, rews, news, infos
+
 
     def reset(self):
         obs = self.venv.reset()

@@ -2,7 +2,7 @@ import numpy as np
 from baselines.a2c.utils import discount_with_dones
 from baselines.common.runners import AbstractEnvRunner
 import random
-
+from copy import deepcopy
 
 class Runner(AbstractEnvRunner):
     """
@@ -20,21 +20,31 @@ class Runner(AbstractEnvRunner):
         super().__init__(env=env, model=model, nsteps=nsteps)
         self.gamma = gamma
         self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
-        self.batch_ob_shape = (self.nenv * nsteps,) + env.observation_space.shape
+        self.batch_ob_shape = (self.n_active_envs * nsteps,) + env.observation_space.shape
+        self.ob_shape = (self.n_active_envs,) + env.observation_space.shape
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
         self.active_envs = None
+        self.all_env_dict = {'obs': deepcopy(self.obs),
+                             'states': deepcopy(self.states),
+                             'dones': deepcopy(self.dones),
+                             'stackedobs': deepcopy(self.env.stackedobs)
+                             }
+
+        self.obs = None
+        self.states = None
+        self.dones = None
+        self.env.stackedobs = None
 
     def run(self):
         # overwrite super class
 
         # We initialize the lists that will contain the mb of experiences
-        # mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)], [[] for _ in range(self.nenv)]
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [], [], [], [], [], [[] for _ in range(self.nenv)]
+        mb_td = []
         mb_states = self.states
         for n in range(self.nsteps):
             # Given observations, take action and value (V(s))
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
-            self.set_active_envs()
             for i in self.active_envs:
                 envs_activations[i].append(n)
 
@@ -50,12 +60,14 @@ class Runner(AbstractEnvRunner):
             obs, rewards, dones, _ = self.env.step(actions)
             self.states = states
             self.dones = dones
-            for i, done in enumerate(dones):
+            for i, (done, env_i) in enumerate(zip(dones, self.active_envs)):
+                self.all_env_dict['dones'][env_i] = done
                 if done:
                     self.obs[i] = self.obs[i] * 0
-            self.obs = obs
+                self.obs[i][:] = obs[i]
             mb_rewards.append(rewards)
         mb_dones.append(self.dones)
+
 
         # Batch of steps to batch of rollouts
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
@@ -78,7 +90,6 @@ class Runner(AbstractEnvRunner):
 
                 mb_rewards[i] = rewards
 
-        mb_obs_active = self.take_active_envs(mb_obs, envs_activations, n)
         mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
         mb_actions = mb_actions.reshape(self.batch_action_shape)
         mb_rewards = mb_rewards.flatten()
@@ -97,3 +108,8 @@ class Runner(AbstractEnvRunner):
         random_env_idx = list(random.sample(list(range(self.env.venv.num_envs)), self.n_active_envs))
         self.active_envs = list(random_env_idx)
         self.env.venv.set_active_envs(random_env_idx)
+
+        self.obs = [self.all_env_dict['obs'][i] for i in self.active_envs]
+        self.states = self.all_env_dict['states'][self.active_envs] if self.all_env_dict['states'] else self.all_env_dict['states']
+        self.dones = [self.all_env_dict['dones'][i] for i in self.active_envs]
+        self.env.stackedobs =  [self.all_env_dict['stackedobs'][i] for i in self.active_envs]

@@ -14,6 +14,7 @@ from baselines.a2c.runner import Runner
 
 from tensorflow import losses
 import traceback
+from copy import deepcopy
 
 class Model(object):
 
@@ -34,7 +35,7 @@ class Model(object):
             alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
 
         sess = tf_util.get_session()
-        nenvs = env.venv.num_envs
+        nenvs = env.venv.n_active_envs
         nbatch = nenvs*nsteps
 
 
@@ -49,6 +50,7 @@ class Model(object):
         ADV = tf.placeholder(tf.float32, [nbatch])
         R = tf.placeholder(tf.float32, [nbatch])
         LR = tf.placeholder(tf.float32, [])
+        TD = tf.placeholder(tf.float32, [nbatch])
 
         # Calculate the loss
         # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
@@ -63,6 +65,9 @@ class Model(object):
 
         # Value loss
         vf_loss = losses.mean_squared_error(tf.squeeze(train_model.vf), R)
+
+        # TD loss
+        td_loss = losses.mean_squared_error(tf.squeeze(train_model.dt), TD)
 
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
 
@@ -86,14 +91,14 @@ class Model(object):
 
         lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
 
-        def train(obs, states, rewards, masks, actions, values):
+        def train(obs, states, rewards, masks, actions, values, td):
             # Here we calculate advantage A(s,a) = R + yV(s') - V(s)
             # rewards = R + yV(s')
             advs = rewards - values
             for step in range(len(obs)):
                 cur_lr = lr.value()
 
-            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr}
+            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr, TD:td}
             if states is not None:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
@@ -102,7 +107,6 @@ class Model(object):
                 td_map
             )
             return policy_loss, value_loss, policy_entropy
-
 
         self.train = train
         self.train_model = train_model
@@ -199,10 +203,12 @@ def learn(
     # Calculate the batch_size
     nbatch = runner.n_active_envs*nsteps
 
+
     # Start total timer
     tstart = time.time()
 
     for update in range(1, total_timesteps//nbatch+1):
+        runner.set_active_envs()
         # Get mini batch of experiences
         obs, states, rewards, masks, actions, values = runner.run()
 
