@@ -106,6 +106,8 @@ class SubprocVecEnv(VecEnv):
     def _assert_not_closed(self):
         assert not self.closed, "Trying to operate on a SubprocVecEnv after calling close()"
 
+    def set_active_envs(self, active_idxs):
+        pass
 
 def _flatten_obs(obs):
     assert isinstance(obs, list) or isinstance(obs, tuple)
