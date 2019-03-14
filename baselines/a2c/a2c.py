@@ -50,7 +50,7 @@ class Model(object):
         ADV = tf.placeholder(tf.float32, [nbatch])
         R = tf.placeholder(tf.float32, [nbatch])
         LR = tf.placeholder(tf.float32, [])
-        TD = tf.placeholder(tf.float32, [nbatch])
+        # TD = tf.placeholder(tf.float32, [nbatch])
 
         # Calculate the loss
         # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
@@ -67,7 +67,7 @@ class Model(object):
         vf_loss = losses.mean_squared_error(tf.squeeze(train_model.vf), R)
 
         # TD loss
-        td_loss = losses.mean_squared_error(tf.squeeze(train_model.dt), TD)
+        # td_loss = losses.mean_squared_error(tf.squeeze(train_model.dt), TD)
 
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
 
@@ -91,14 +91,15 @@ class Model(object):
 
         lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
 
-        def train(obs, states, rewards, masks, actions, values, td):
+        def train(obs, states, rewards, masks, actions, values):
             # Here we calculate advantage A(s,a) = R + yV(s') - V(s)
             # rewards = R + yV(s')
             advs = rewards - values
             for step in range(len(obs)):
                 cur_lr = lr.value()
 
-            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr, TD:td}
+            # td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr, TD:td}
+            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr}
             if states is not None:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
