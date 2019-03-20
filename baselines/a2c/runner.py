@@ -42,6 +42,8 @@ class Runner(AbstractEnvRunner):
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [], [], [], [], [], [[] for _ in range(self.nenv)]
         mb_td = []
         mb_states = self.states
+        epinfos = []
+
         for n in range(self.nsteps):
             # Given observations, take action and value (V(s))
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
@@ -57,7 +59,11 @@ class Runner(AbstractEnvRunner):
             mb_dones.append(self.dones)
 
             # Take actions in env and look the results
-            obs, rewards, dones, _ = self.env.step(actions)
+            obs, rewards, dones, infos = self.env.step(actions)
+            for info in infos:
+                maybeepinfo = info.get('episode')
+                if maybeepinfo: epinfos.append(maybeepinfo)
+
             self.states = states
             self.dones = dones
             for i, (done, env_i) in enumerate(zip(dones, self.active_envs)):
@@ -95,7 +101,8 @@ class Runner(AbstractEnvRunner):
         mb_rewards = mb_rewards.flatten()
         mb_values = mb_values.flatten()
         mb_masks = mb_masks.flatten()
-        return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values
+
+        return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values, epinfos
 
     @staticmethod
     def take_active_envs(obs, env_activation, last_step):
