@@ -17,6 +17,9 @@ from collections import deque
 from tensorflow import losses
 import traceback
 from copy import deepcopy
+from baselines.a2c.Prioritizer import *
+from baselines.a2c.MyNN import MyNN
+
 
 class Model(object):
 
@@ -40,13 +43,13 @@ class Model(object):
         nenvs = env.venv.n_active_envs
         nbatch = nenvs*nsteps
 
-
         with tf.variable_scope('a2c_model', reuse=tf.AUTO_REUSE):
             # step_model is used for sampling
             step_model = policy(nenvs, 1, sess)
 
             # train_model is used to train our network
             train_model = policy(nbatch, nsteps, sess)
+            # our TD evaluating network
 
         A = tf.placeholder(train_model.action.dtype, train_model.action.shape)
         ADV = tf.placeholder(tf.float32, [nbatch])
@@ -72,24 +75,42 @@ class Model(object):
         # td_loss = losses.mean_squared_error(tf.squeeze(train_model.dt), TD)
 
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
+        """prio model"""
+        sess_prio = tf.Session()
+        with tf.variable_scope('a2c_model_prio', reuse=tf.AUTO_REUSE):
+            prio_model = policy(nbatch, nsteps, sess_prio)
+            # prio_model = MyNN(env, nbatch)
+
+        P_A = tf.placeholder(prio_model.action.dtype, prio_model.action.shape)
+        P_ADV = tf.placeholder(tf.float32, [nbatch])
+        P_R = tf.placeholder(tf.float32, [nbatch])
+        P_LR = tf.placeholder(tf.float32, [])
+
+        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.vf), P_R)
 
         # Update parameters using loss
         # 1. Get the model parameters
         params = find_trainable_variables("a2c_model")
+        params_prio = find_trainable_variables("a2c_model_prio") ## I add this with another scope name. now it pass the point
 
         # 2. Calculate the gradients
         grads = tf.gradients(loss, params)
+        prio_grads = tf.gradients(prio_model_loss, params_prio)
         if max_grad_norm is not None:
             # Clip the gradients (normalize)
             grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
+            prio_grads, prio_grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         grads = list(zip(grads, params))
+        prio_grads = list(zip(prio_grads, params_prio))
         # zip aggregate each gradient with parameters associated
         # For instance zip(ABCD, xyza) => Ax, By, Cz, Da
 
         # 3. Make op for one policy and value update step of A2C
         trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
+        prio_trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
 
         _train = trainer.apply_gradients(grads)
+        _prio_train = prio_trainer.apply_gradients(prio_grads)
 
         lr = Scheduler(v=lr, nvalues=total_timesteps, schedule=lrschedule)
 
@@ -105,15 +126,24 @@ class Model(object):
             if states is not None:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
+
             policy_loss, value_loss, policy_entropy, _ = sess.run(
                 [pg_loss, vf_loss, entropy, _train],
                 td_map
+            )
+
+            prio_td_map = {prio_model.X:deepcopy(obs), P_A:deepcopy(actions),P_ADV:deepcopy(advs),
+                           P_R:deepcopy(rewards), P_LR:deepcopy(cur_lr)} # THIS IS WHAT I ADDED
+            _value_loss, _ = sess_prio.run(
+                [prio_model_loss, _prio_train],
+                prio_td_map
             )
             return policy_loss, value_loss, policy_entropy
 
         self.train = train
         self.train_model = train_model
         self.step_model = step_model
+        self.prio_model = prio_model
         self.step = step_model.step
         self.value = step_model.value
         self.initial_state = step_model.initial_state
@@ -201,7 +231,8 @@ def learn(
         model.load(load_path)
 
     # Instantiate the runner object
-    runner = Runner(env, model, nsteps=nsteps, gamma=gamma)
+    prioritizer = Prioritizer(env.num_envs, env.venv.n_active_envs)
+    runner = Runner(env, model, prioritizer, nsteps=nsteps, gamma=gamma)
     epinfobuf = deque(maxlen=100)
 
     # Calculate the batch_size
@@ -212,7 +243,6 @@ def learn(
     tstart = time.time()
 
     for update in range(1, total_timesteps//nbatch+1):
-        runner.set_active_envs()
         # Get mini batch of experiences
         obs, states, rewards, masks, actions, values, epinfos = runner.run()
         epinfobuf.extend(epinfos)

@@ -61,7 +61,7 @@ class PolicyWithValue(object):
             self.vf = self.q
         else:
             self.vf = fc(vf_latent, 'vf', 1)
-            self.vf = self.vf[:,0]
+            self.vf = self.vf[:, 0]
 
     def _evaluate(self, variables, observation, **extra_feed):
         sess = self.sess

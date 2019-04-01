@@ -1,7 +1,6 @@
 import numpy as np
 from baselines.a2c.utils import discount_with_dones
 from baselines.common.runners import AbstractEnvRunner
-import random
 from copy import deepcopy
 
 class Runner(AbstractEnvRunner):
@@ -15,7 +14,7 @@ class Runner(AbstractEnvRunner):
     - Make a mini batch of experiences
     """
 
-    def __init__(self, env, model, nsteps=5, gamma=0.99):
+    def __init__(self, env, model, prioritizer, nsteps=5, gamma=0.99):
         self.n_active_envs = env.venv.n_active_envs
         super().__init__(env=env, model=model, nsteps=nsteps)
         self.gamma = gamma
@@ -34,11 +33,14 @@ class Runner(AbstractEnvRunner):
         self.states = None
         self.dones = None
         self.env.stackedobs = None
+        self.prioritizer = prioritizer
+        self.prio_val = None
 
     def run(self):
         # overwrite super class
 
         # We initialize the lists that will contain the mb of experiences
+        self.set_active_envs()
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, envs_activations = [], [], [], [], [], [[] for _ in range(self.nenv)]
         mb_td = []
         mb_states = self.states
@@ -51,6 +53,7 @@ class Runner(AbstractEnvRunner):
                 envs_activations[i].append(n)
 
             actions, values, states, _ = self.model.step(self.obs, S=self.states, M=self.dones)
+            self.prio_val = values
 
             # Append the experiences
             mb_obs.append(np.copy(self.obs))
@@ -73,7 +76,6 @@ class Runner(AbstractEnvRunner):
                 self.obs[i][:] = obs[i]
             mb_rewards.append(rewards)
         mb_dones.append(self.dones)
-
 
         # Batch of steps to batch of rollouts
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
@@ -112,7 +114,7 @@ class Runner(AbstractEnvRunner):
         return mb_obs_active
 
     def set_active_envs(self):
-        random_env_idx = list(random.sample(list(range(self.env.venv.num_envs)), self.n_active_envs))
+        random_env_idx = self.prioritizer.pick_active_envs(self.prio_val)
         self.active_envs = list(random_env_idx)
         self.env.venv.set_active_envs(random_env_idx)
 
@@ -120,3 +122,4 @@ class Runner(AbstractEnvRunner):
         self.states = self.all_env_dict['states'][self.active_envs] if self.all_env_dict['states'] else self.all_env_dict['states']
         self.dones = [self.all_env_dict['dones'][i] for i in self.active_envs]
         self.env.stackedobs =  [self.all_env_dict['stackedobs'][i] for i in self.active_envs]
+

@@ -1,18 +1,17 @@
+import functools
 import os.path as osp
 import time
-import functools
+from collections import deque
+
 import tensorflow as tf
 from baselines import logger
-
-from baselines.common import set_global_seeds, explained_variance
-from baselines.common.policies import build_policy
-from baselines.common.tf_util import get_session, save_variables, load_variables
-
 from baselines.a2c.runner import Runner
 from baselines.a2c.utils import Scheduler, find_trainable_variables
 from baselines.acktr import kfac
+from baselines.common import set_global_seeds, explained_variance
+from baselines.common.policies import build_policy
+from baselines.common.tf_util import get_session, save_variables, load_variables
 from baselines.ppo2.ppo2 import safemean
-from collections import deque
 
 
 class Model(object):
