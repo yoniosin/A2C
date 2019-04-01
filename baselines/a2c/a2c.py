@@ -99,7 +99,7 @@ class Model(object):
         if max_grad_norm is not None:
             # Clip the gradients (normalize)
             grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-            prio_grads, prio_grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
+            prio_grads, prio_grad_norm = tf.clip_by_global_norm(prio_grads, max_grad_norm)
         grads = list(zip(grads, params))
         prio_grads = list(zip(prio_grads, params_prio))
         # zip aggregate each gradient with parameters associated
@@ -132,8 +132,8 @@ class Model(object):
                 td_map
             )
 
-            prio_td_map = {prio_model.X:deepcopy(obs), P_A:deepcopy(actions),P_ADV:deepcopy(advs),
-                           P_R:deepcopy(rewards), P_LR:deepcopy(cur_lr)} # THIS IS WHAT I ADDED
+            prio_td_map = {prio_model.X:obs, P_A:actions,P_ADV:advs,
+                           P_R:rewards, P_LR:cur_lr} # THIS IS WHAT I ADDED
             _value_loss, _ = sess_prio.run(
                 [prio_model_loss, _prio_train],
                 prio_td_map
