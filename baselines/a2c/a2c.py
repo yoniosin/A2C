@@ -55,7 +55,6 @@ class Model(object):
         ADV = tf.placeholder(tf.float32, [nbatch])
         R = tf.placeholder(tf.float32, [nbatch])
         LR = tf.placeholder(tf.float32, [])
-        # TD = tf.placeholder(tf.float32, [nbatch])
 
         # Calculate the loss
         # Total loss = Policy gradient loss - entropy * entropy coefficient + Value coefficient * value loss
@@ -76,17 +75,16 @@ class Model(object):
 
         loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
         """prio model"""
-        sess_prio = tf.Session()
         with tf.variable_scope('a2c_model_prio', reuse=tf.AUTO_REUSE):
-            prio_model = policy(nbatch, nsteps, sess_prio)
-            # prio_model = MyNN(env, nbatch)
+            # prio_model = policy(nbatch, nsteps, sess)
+            prio_model = MyNN(env, nbatch)
 
-        P_A = tf.placeholder(prio_model.action.dtype, prio_model.action.shape)
-        P_ADV = tf.placeholder(tf.float32, [nbatch])
+        # P_A = tf.placeholder(prio_model.action.dtype, prio_model.action.shape)
+        # P_ADV = tf.placeholder(tf.float32, [nbatch])
         P_R = tf.placeholder(tf.float32, [nbatch])
         P_LR = tf.placeholder(tf.float32, [])
 
-        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.vf), P_R)
+        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_R)
 
         # Update parameters using loss
         # 1. Get the model parameters
@@ -107,7 +105,7 @@ class Model(object):
 
         # 3. Make op for one policy and value update step of A2C
         trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
-        prio_trainer = tf.train.RMSPropOptimizer(learning_rate=LR, decay=alpha, epsilon=epsilon)
+        prio_trainer = tf.train.RMSPropOptimizer(learning_rate=P_LR, decay=alpha, epsilon=epsilon)
 
         _train = trainer.apply_gradients(grads)
         _prio_train = prio_trainer.apply_gradients(prio_grads)
@@ -132,13 +130,16 @@ class Model(object):
                 td_map
             )
 
-            prio_td_map = {prio_model.X:obs, P_A:actions,P_ADV:advs,
-                           P_R:rewards, P_LR:cur_lr} # THIS IS WHAT I ADDED
-            _value_loss, _ = sess_prio.run(
+            # prio_td_map = {prio_model.X:obs, P_A:actions,P_ADV:advs,
+            #                P_R:rewards, P_LR:cur_lr} # THIS IS WHAT I ADDED
+
+            prio_td_map = {prio_model.X: obs, P_R: rewards, P_LR: cur_lr}
+
+            prio_loss, _ = sess.run(
                 [prio_model_loss, _prio_train],
                 prio_td_map
             )
-            return policy_loss, value_loss, policy_entropy
+            return policy_loss, value_loss, policy_entropy, prio_loss
 
         self.train = train
         self.train_model = train_model
@@ -247,7 +248,7 @@ def learn(
         obs, states, rewards, masks, actions, values, epinfos = runner.run()
         epinfobuf.extend(epinfos)
 
-        policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
+        policy_loss, value_loss, policy_entropy, prio_loss = model.train(obs, states, rewards, masks, actions, values)
         nseconds = time.time()-tstart
 
         # Calculate the fps (frame per second)
@@ -261,6 +262,7 @@ def learn(
             logger.record_tabular("fps", fps)
             logger.record_tabular("policy_entropy", float(policy_entropy))
             logger.record_tabular("value_loss", float(value_loss))
+            logger.record_tabular("prio_loss", float(prio_loss))
             logger.record_tabular("explained_variance", float(ev))
             logger.record_tabular("eprewmean", safemean([epinfo['r'] for epinfo in epinfobuf]))
             logger.record_tabular("eplenmean", safemean([epinfo['l'] for epinfo in epinfobuf]))
