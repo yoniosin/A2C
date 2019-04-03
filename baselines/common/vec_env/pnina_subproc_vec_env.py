@@ -31,13 +31,13 @@ class ModifiedSubprocVecEnv(SubprocVecEnv):
         obs, rews, dones, infos = zip(*results)
         return _flatten_obs(obs), np.stack(rews), np.stack(dones), infos
 
-    # def close_extras(self):
-    #     self.closed = True
-    #     if self.waiting:
-    #         for i, remote in enumerate(self.remotes):
-    #             if i in self.active_envs_set:
-    #                 remote.recv()
-    #     for remote in self.remotes:
-    #         remote.send(('close', None))
-    #     for p in self.ps:
-    #         p.join()
+    def close_extras(self):
+        self.closed = True
+        if self.waiting:
+            for i, remote in enumerate(self.remotes):
+                if i in self.active_envs_set:
+                    remote.recv()
+        for remote in self.remotes:
+            remote.send(('close', None))
+        for p in self.ps:
+            p.join()

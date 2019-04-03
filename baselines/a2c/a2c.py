@@ -8,7 +8,6 @@ from baselines.common import set_global_seeds, explained_variance
 from baselines.common import tf_util
 from baselines.common.policies import build_policy
 
-
 from baselines.a2c.utils import Scheduler, find_trainable_variables
 from baselines.a2c.runner import Runner
 from baselines.ppo2.ppo2 import safemean
@@ -16,13 +15,11 @@ from collections import deque
 
 from tensorflow import losses
 import traceback
-from copy import deepcopy
 from baselines.a2c.Prioritizer import *
 from baselines.a2c.MyNN import MyNN
 
 
 class Model(object):
-
     """
     We use this class to :
         __init__:
@@ -35,13 +32,14 @@ class Model(object):
         save/load():
         - Save load the model
     """
+
     def __init__(self, policy, env, nsteps,
-            ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
-            alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
+                 ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
+                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
 
         sess = tf_util.get_session()
         nenvs = env.venv.n_active_envs
-        nbatch = nenvs*nsteps
+        nbatch = nenvs * nsteps
 
         with tf.variable_scope('a2c_model', reuse=tf.AUTO_REUSE):
             # step_model is used for sampling
@@ -73,23 +71,22 @@ class Model(object):
         # TD loss
         # td_loss = losses.mean_squared_error(tf.squeeze(train_model.dt), TD)
 
-        loss = pg_loss - entropy*ent_coef + vf_loss * vf_coef
+        loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
         """prio model"""
         with tf.variable_scope('a2c_model_prio', reuse=tf.AUTO_REUSE):
             # prio_model = policy(nbatch, nsteps, sess)
             prio_model = MyNN(env, nbatch)
 
-        # P_A = tf.placeholder(prio_model.action.dtype, prio_model.action.shape)
-        # P_ADV = tf.placeholder(tf.float32, [nbatch])
         P_R = tf.placeholder(tf.float32, [nbatch])
+        P_TD = tf.placeholder(tf.float32, [nbatch])
         P_LR = tf.placeholder(tf.float32, [])
 
-        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_R)
-
+        # prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_R) # Reward
+        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_TD)  # TD Error
         # Update parameters using loss
         # 1. Get the model parameters
         params = find_trainable_variables("a2c_model")
-        params_prio = find_trainable_variables("a2c_model_prio") ## I add this with another scope name. now it pass the point
+        params_prio = find_trainable_variables("a2c_model_prio")
 
         # 2. Calculate the gradients
         grads = tf.gradients(loss, params)
@@ -120,7 +117,7 @@ class Model(object):
                 cur_lr = lr.value()
 
             # td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr, TD:td}
-            td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr}
+            td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: cur_lr}
             if states is not None:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
@@ -130,15 +127,15 @@ class Model(object):
                 td_map
             )
 
-            # prio_td_map = {prio_model.X:obs, P_A:actions,P_ADV:advs,
-            #                P_R:rewards, P_LR:cur_lr} # THIS IS WHAT I ADDED
+            prio_td_map = {prio_model.X: obs, P_R: rewards, P_LR: cur_lr, P_TD: advs}
 
-            prio_td_map = {prio_model.X: obs, P_R: rewards, P_LR: cur_lr}
-
-            prio_loss, _ = sess.run(
-                [prio_model_loss, _prio_train],
+            prio_loss, _, p_td = sess.run(
+                [prio_model_loss, _prio_train, P_TD],
                 prio_td_map
             )
+            # mb aranged as 1D-vector = [[env_1: n1, ..., n_nstep],...,[env_n_active]]
+            # need to take last value of each env's buffer
+            self.prio_score = advs[nsteps - 1::nsteps]  # TODO
             return policy_loss, value_loss, policy_entropy, prio_loss
 
         self.train = train
@@ -154,24 +151,23 @@ class Model(object):
 
 
 def learn(
-    network,
-    env,
-    prio_args,
-    seed=None,
-    nsteps=5,
-    total_timesteps=int(80e6),
-    vf_coef=0.5,
-    ent_coef=0.01,
-    max_grad_norm=0.5,
-    lr=7e-4,
-    lrschedule='linear',
-    epsilon=1e-5,
-    alpha=0.99,
-    gamma=0.99,
-    log_interval=100,
-    load_path=None,
-    **network_kwargs):
-
+        network,
+        env,
+        prio_args,
+        seed=None,
+        nsteps=5,
+        total_timesteps=int(80e6),
+        vf_coef=0.5,
+        ent_coef=0.01,
+        max_grad_norm=0.5,
+        lr=7e-4,
+        lrschedule='linear',
+        epsilon=1e-5,
+        alpha=0.99,
+        gamma=0.99,
+        log_interval=100,
+        load_path=None,
+        **network_kwargs):
     '''
     Main entrypoint for A2C algorithm. Train a policy with given network architecture on a given environment using a2c algorithm.
 
@@ -227,38 +223,40 @@ def learn(
 
     # Instantiate the model object (that creates step_model and train_model)
     model = Model(policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-        max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
+                  max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps,
+                  lrschedule=lrschedule)
     if load_path is not None:
         model.load(load_path)
 
     # Instantiate the runner object
-    prioritizer = Prioritizer(env.num_envs, env.venv.n_active_envs)
+    prioritizer = PrioritizerFactory(prio_args)
     runner = Runner(env, model, prioritizer, nsteps=nsteps, gamma=gamma)
     epinfobuf = deque(maxlen=100)
 
     # Calculate the batch_size
-    nbatch = runner.n_active_envs*nsteps
-
+    nbatch = runner.n_active_envs * nsteps
 
     # Start total timer
     tstart = time.time()
 
-    for update in range(1, total_timesteps//nbatch+1):
+    for update in range(1, total_timesteps // nbatch + 1):
         # Get mini batch of experiences
         obs, states, rewards, masks, actions, values, epinfos = runner.run()
         epinfobuf.extend(epinfos)
 
         policy_loss, value_loss, policy_entropy, prio_loss = model.train(obs, states, rewards, masks, actions, values)
-        nseconds = time.time()-tstart
+        for i, env in enumerate(runner.active_envs):
+            runner.all_env_dict['prio_val'][env] = model.prio_score[i]
+        nseconds = time.time() - tstart
 
         # Calculate the fps (frame per second)
-        fps = int((update*nbatch)/nseconds)
+        fps = int((update * nbatch) / nseconds)
         if update % log_interval == 0 or update == 1:
             # Calculates if value function is a good predicator of the returns (ev > 1)
             # or if it's just worse than predicting nothing (ev =< 0)
             ev = explained_variance(values, rewards)
             logger.record_tabular("nupdates", update)
-            logger.record_tabular("total_timesteps", update*nbatch)
+            logger.record_tabular("total_timesteps", update * nbatch)
             logger.record_tabular("fps", fps)
             logger.record_tabular("policy_entropy", float(policy_entropy))
             logger.record_tabular("value_loss", float(value_loss))
@@ -268,4 +266,3 @@ def learn(
             logger.record_tabular("eplenmean", safemean([epinfo['l'] for epinfo in epinfobuf]))
             logger.dump_tabular()
     return model
-

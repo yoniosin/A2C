@@ -26,7 +26,8 @@ class Runner(AbstractEnvRunner):
         self.all_env_dict = {'obs': deepcopy(self.obs),
                              'states': deepcopy(self.states),
                              'dones': deepcopy(self.dones),
-                             'stackedobs': deepcopy(self.env.stackedobs)
+                             'stackedobs': deepcopy(self.env.stackedobs),
+                             'prio_val': np.zeros(len(self.obs))
                              }
 
         self.obs = None
@@ -53,7 +54,6 @@ class Runner(AbstractEnvRunner):
                 envs_activations[i].append(n)
 
             actions, values, states, _ = self.model.step(self.obs, S=self.states, M=self.dones)
-            self.prio_val = values
 
             # Append the experiences
             mb_obs.append(np.copy(self.obs))
@@ -114,7 +114,7 @@ class Runner(AbstractEnvRunner):
         return mb_obs_active
 
     def set_active_envs(self):
-        random_env_idx = self.prioritizer.pick_active_envs(self.prio_val)
+        random_env_idx = self.prioritizer.pick_active_envs(self.all_env_dict['prio_val'])
         self.active_envs = list(random_env_idx)
         self.env.venv.set_active_envs(random_env_idx)
 

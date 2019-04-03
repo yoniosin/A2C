@@ -2,6 +2,7 @@ from baselines.common.models import get_network_builder
 from baselines.a2c.utils import fc
 from baselines.common.input import observation_placeholder, encode_observation
 import tensorflow as tf
+from baselines.common.tf_util import get_session, adjust_shape
 
 
 class MyNN:
@@ -15,3 +16,10 @@ class MyNN:
             self.h1 = self.conv_net(encoded_x)
         self.h2 = fc(self.h1, 'vf', 1)
         self.out = self.h2[:, 0]
+
+    def evaluate(self, vars, input):
+        sess = get_session()
+        feed_dict = {self.X: adjust_shape(self.X, input)}
+
+        return sess.run(vars, feed_dict)
+
