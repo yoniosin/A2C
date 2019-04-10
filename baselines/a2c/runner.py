@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 from baselines.a2c.utils import discount_with_dones
 from baselines.common.runners import AbstractEnvRunner
@@ -14,8 +16,9 @@ class Runner(AbstractEnvRunner):
     - Make a mini batch of experiences
     """
 
-    def __init__(self, env, model, prioritizer, nsteps=5, gamma=0.99):
-        self.n_active_envs = env.venv.n_active_envs
+    def __init__(self, env, model, prioritizer, nsteps=5, gamma=0.99, epsilon=0.15):
+        self.epsilon = epsilon
+        self.n_active_envs = model.get_active_envs(env)
         super().__init__(env=env, model=model, nsteps=nsteps)
         self.gamma = gamma
         self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
@@ -23,12 +26,18 @@ class Runner(AbstractEnvRunner):
         self.ob_shape = (self.n_active_envs,) + env.observation_space.shape
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
         self.active_envs = None
+
+
+
         self.all_env_dict = {'obs': deepcopy(self.obs),
                              'states': deepcopy(self.states),
                              'dones': deepcopy(self.dones),
-                             'stackedobs': deepcopy(self.env.stackedobs),
-                             'prio_val': np.zeros(len(self.obs))
+                             'prio_val': np.full((len(self.obs)), np.inf)
                              }
+        try:
+            self.all_env_dict['stackedobs'] = deepcopy(self.env.stackedobs)
+        except:
+            self.all_env_dict['stackedobs'] = deepcopy(self.obs)
 
         self.obs = None
         self.states = None
@@ -104,7 +113,7 @@ class Runner(AbstractEnvRunner):
         mb_values = mb_values.flatten()
         mb_masks = mb_masks.flatten()
 
-        return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values, epinfos
+        return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values, epinfos, self.active_envs, self.prio_val
 
     @staticmethod
     def take_active_envs(obs, env_activation, last_step):
@@ -116,7 +125,10 @@ class Runner(AbstractEnvRunner):
     def set_active_envs(self):
         random_env_idx = self.prioritizer.pick_active_envs(self.all_env_dict['prio_val'])
         self.active_envs = list(random_env_idx)
-        self.env.venv.set_active_envs(random_env_idx)
+        try:
+            self.env.venv.set_active_envs(random_env_idx)
+        except AttributeError:
+            self.env.venv.venv.set_active_envs(random_env_idx)
 
         self.obs = [self.all_env_dict['obs'][i] for i in self.active_envs]
         self.states = self.all_env_dict['states'][self.active_envs] if self.all_env_dict['states'] else self.all_env_dict['states']

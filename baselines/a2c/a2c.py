@@ -19,6 +19,15 @@ from baselines.a2c.Prioritizer import *
 from baselines.a2c.MyNN import MyNN
 
 
+def GetValuesForPrio(prio_type, prio_param, advs, rewards):
+    if prio_type == 'greedy':
+        if prio_param == 'reward':
+            return rewards
+        if prio_param == 'error':
+            return abs(advs)
+    raise NotImplementedError(prio_type + ' ' + prio_param)
+
+
 class Model(object):
     """
     We use this class to :
@@ -33,12 +42,21 @@ class Model(object):
         - Save load the model
     """
 
+    @staticmethod
+    def get_active_envs(env):
+        try:
+            return env.venv.n_active_envs
+        except AttributeError:
+            return env.venv.venv.n_active_envs
+
     def __init__(self, policy, env, nsteps,
                  ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
-                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
+                 alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear', network='cnn', prio_args=None):
 
+        self.prio_args = prio_args
         sess = tf_util.get_session()
-        nenvs = env.venv.n_active_envs
+        nenvs = self.get_active_envs(env)
+
         nbatch = nenvs * nsteps
 
         with tf.variable_scope('a2c_model', reuse=tf.AUTO_REUSE):
@@ -75,14 +93,14 @@ class Model(object):
         """prio model"""
         with tf.variable_scope('a2c_model_prio', reuse=tf.AUTO_REUSE):
             # prio_model = policy(nbatch, nsteps, sess)
-            prio_model = MyNN(env, nbatch)
+            prio_model = MyNN(env, nbatch, network)
 
         P_R = tf.placeholder(tf.float32, [nbatch])
-        P_TD = tf.placeholder(tf.float32, [nbatch])
+        PRIO = tf.placeholder(tf.float32, [nbatch])
         P_LR = tf.placeholder(tf.float32, [])
 
         # prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_R) # Reward
-        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), P_TD)  # TD Error
+        prio_model_loss = losses.mean_squared_error(tf.squeeze(prio_model.out), PRIO)  # TD Error
         # Update parameters using loss
         # 1. Get the model parameters
         params = find_trainable_variables("a2c_model")
@@ -116,7 +134,6 @@ class Model(object):
             for step in range(len(obs)):
                 cur_lr = lr.value()
 
-            # td_map = {train_model.X:obs, A:actions, ADV:advs, R:rewards, LR:cur_lr, TD:td}
             td_map = {train_model.X: obs, A: actions, ADV: advs, R: rewards, LR: cur_lr}
             if states is not None:
                 td_map[train_model.S] = states
@@ -127,15 +144,18 @@ class Model(object):
                 td_map
             )
 
-            prio_td_map = {prio_model.X: obs, P_R: rewards, P_LR: cur_lr, P_TD: advs}
+            prio_loss = 0
+            if self.prio_args is not None:
+                prio_values = GetValuesForPrio(self.prio_args['prio_type'], self.prio_args['prio_param'], advs, rewards)
+                prio_td_map = {prio_model.X: obs, P_R: rewards, P_LR: cur_lr, PRIO: prio_values}
 
-            prio_loss, _, p_td = sess.run(
-                [prio_model_loss, _prio_train, P_TD],
-                prio_td_map
-            )
-            # mb aranged as 1D-vector = [[env_1: n1, ..., n_nstep],...,[env_n_active]]
-            # need to take last value of each env's buffer
-            self.prio_score = advs[nsteps - 1::nsteps]  # TODO
+                prio_loss, _, p_td = sess.run(
+                    [prio_model_loss, _prio_train, PRIO],
+                    prio_td_map
+                )
+                # mb aranged as 1D-vector = [[env_1: n1, ..., n_nstep],...,[env_n_active]]
+                # need to take last value of each env's buffer
+                self.prio_score = prio_values[list(filter(lambda x: x % nsteps == (nsteps - 1), range(len(prio_values))))]
             return policy_loss, value_loss, policy_entropy, prio_loss
 
         self.train = train
@@ -224,7 +244,7 @@ def learn(
     # Instantiate the model object (that creates step_model and train_model)
     model = Model(policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                   max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps,
-                  lrschedule=lrschedule)
+                  lrschedule=lrschedule, network=network, prio_args=prio_args)
     if load_path is not None:
         model.load(load_path)
 
@@ -241,8 +261,12 @@ def learn(
 
     for update in range(1, total_timesteps // nbatch + 1):
         # Get mini batch of experiences
-        obs, states, rewards, masks, actions, values, epinfos = runner.run()
+        obs, states, rewards, masks, actions, values, epinfos, active_envs, prio_val = runner.run()
         epinfobuf.extend(epinfos)
+
+        if update % log_interval == 0 or update == 1:
+            print(runner.all_env_dict['prio_val'])
+            print(active_envs)
 
         policy_loss, value_loss, policy_entropy, prio_loss = model.train(obs, states, rewards, masks, actions, values)
         for i, env in enumerate(runner.active_envs):
@@ -264,5 +288,7 @@ def learn(
             logger.record_tabular("explained_variance", float(ev))
             logger.record_tabular("eprewmean", safemean([epinfo['r'] for epinfo in epinfobuf]))
             logger.record_tabular("eplenmean", safemean([epinfo['l'] for epinfo in epinfobuf]))
+            # logger.record_tabular("active envs", np.asarray(active_envs, dtype=float))
             logger.dump_tabular()
+
     return model

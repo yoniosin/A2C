@@ -168,6 +168,7 @@ def common_arg_parser():
     parser.add_argument('--play', default=False, action='store_true')
     parser.add_argument('--prioritize', default=False, help='prioritize agents in different envs', type=bool)
     parser.add_argument('--prio_type', default='random', help='prioritize agents type', type=str)
+    parser.add_argument('--prio_param', default='reward', help='prioritize agents type', type=str)
     parser.add_argument('--n_active_envs', default=8, help='Number of agents (envs) to choose in each step', type=int)  # TODO
     return parser
 

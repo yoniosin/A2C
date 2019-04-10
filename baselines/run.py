@@ -62,8 +62,8 @@ def train(args, extra_args):
     learn = get_learn_function(args.alg)
     alg_kwargs = get_learn_function_defaults(args.alg, env_type)
     alg_kwargs.update(extra_args)
-    env = build_env(args, train=True)
-    prio_args = {key: getattr(args, key) for key in ['prioritize', 'n_active_envs', 'num_env', 'prio_type']}
+    env = build_env(args)
+    prio_args = {key: getattr(args, key) for key in ['prioritize', 'n_active_envs', 'num_env', 'prio_type', 'prio_param']}
     prio_args['num_env'] = env.num_envs
     if args.save_video_interval != 0:
         env = VecVideoRecorder(env, osp.join(logger.Logger.CURRENT.dir, "videos"),
@@ -89,7 +89,7 @@ def train(args, extra_args):
     return model, env
 
 
-def build_env(args, train=False):
+def build_env(args):
     ncpu = multiprocessing.cpu_count()
     if sys.platform == 'darwin': ncpu //= 2
     nenv = args.num_env or ncpu
@@ -106,7 +106,7 @@ def build_env(args, train=False):
         else:
             frame_stack_size = 4
             env = make_vec_env(env_id, env_type, nenv, seed, gamestate=args.gamestate, reward_scale=args.reward_scale,
-                               prioritize=args.prioritize and train, n_active_envs=args.n_active_envs)
+                               prioritize=args.prioritize, n_active_envs=args.n_active_envs)
             env = VecFrameStack(env, frame_stack_size)
 
     else:
@@ -118,7 +118,7 @@ def build_env(args, train=False):
 
         flatten_dict_observations = alg not in {'her'}
         env = make_vec_env(env_id, env_type, args.num_env or 1, seed, reward_scale=args.reward_scale,
-                           prioritize=args.prioritize and train, n_active_envs=args.n_active_envs,
+                           prioritize=args.prioritize, n_active_envs=args.n_active_envs,
                            flatten_dict_observations=flatten_dict_observations)
 
         if env_type == 'mujoco':
